@@ -1,0 +1,11 @@
+{
+  "version": "baseline-v1",
+  "bias": -4.0,
+  "weights": {
+    "amount_scaled": 3.0,
+    "is_online": 1.0,
+    "is_international": 1.8,
+    "merchant_risk": 0.8
+  },
+  "fraud_threshold": 0.65
+}

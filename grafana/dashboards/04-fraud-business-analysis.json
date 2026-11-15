@@ -1,0 +1,324 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "PostgreSQL business analysis. Filters apply to score density and filtered TPS; the category fraud-share bar plot uses the latest 1,000 matching transactions. Includes a merchant exposure chart.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Score density (most recent 1,000 filtered transactions)",
+      "type": "barchart",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "description": "Filtered density distribution of probability scores. The query uses only the latest 1,000 rows matching the selected state and merchant.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "orientation": "vertical",
+        "xField": "score_bucket",
+        "showValue": "always",
+        "groupWidth": 0.7,
+        "barWidth": 0.8,
+        "stacking": {
+          "mode": "none",
+          "group": "A"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawSql": "WITH recent AS (\n    SELECT score\n    FROM scores\n    WHERE us_state IN (${state:sqlstring})\n      AND merch IN (${merch:sqlstring})\n    ORDER BY created_at DESC\n    LIMIT 1000\n), buckets AS (\n    SELECT width_bucket(score, 0.0, 1.000001, 20) AS bucket, COUNT(*) AS n\n    FROM recent\n    GROUP BY 1\n)\nSELECT (bucket::text || ' / 20') AS score_bucket,\n       n::double precision / NULLIF(SUM(n) OVER (), 0) AS density\nFROM buckets\nORDER BY bucket",
+          "refId": "A",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Filtered TPS (transactions per second)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "description": "Minute counts are divided by 60 to display average transactions per second for the selected state and merchant filters.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres"
+          },
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '1m'), COUNT(*)::double precision / 60.0 AS tps\nFROM scores\nWHERE $__timeFilter(created_at)\n  AND us_state IN (${state:sqlstring})\n  AND merch IN (${merch:sqlstring})\nGROUP BY 1\nORDER BY 1",
+          "refId": "A",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Fraud share by product category — last 1,000 matching transactions",
+      "type": "barchart",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "description": "Required category bar plot. The average fraud flag is calculated over the latest 1,000 filtered transactions.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "orientation": "vertical",
+        "xField": "cat_id",
+        "showValue": "always",
+        "groupWidth": 0.7,
+        "barWidth": 0.8,
+        "stacking": {
+          "mode": "none",
+          "group": "A"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawSql": "WITH latest_1000 AS (\n    SELECT cat_id, fraud_flag\n    FROM scores\n    WHERE us_state IN (${state:sqlstring})\n      AND merch IN (${merch:sqlstring})\n    ORDER BY created_at DESC\n    LIMIT 1000\n)\nSELECT cat_id,\n       ROUND(100.0 * AVG(fraud_flag::numeric), 2) AS fraud_share_pct,\n       COUNT(*) AS transactions\nFROM latest_1000\nGROUP BY cat_id\nORDER BY fraud_share_pct DESC",
+          "refId": "A",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Flagged transaction amount by merchant — last 24 hours",
+      "type": "barchart",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres"
+      },
+      "description": "Additional business metric: nominal amount of transactions flagged as fraud, grouped by merchant for the last 24 hours.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "orientation": "vertical",
+        "xField": "merch",
+        "showValue": "always",
+        "groupWidth": 0.7,
+        "barWidth": 0.8,
+        "stacking": {
+          "mode": "none",
+          "group": "A"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres"
+          },
+          "format": "table",
+          "rawSql": "SELECT merch,\n       ROUND(SUM(transaction_amount * fraud_flag)::numeric, 2) AS flagged_amount\nFROM scores\nWHERE created_at >= NOW() - INTERVAL '24 hours'\n  AND us_state IN (${state:sqlstring})\n  AND merch IN (${merch:sqlstring})\nGROUP BY merch\nORDER BY flagged_amount DESC\nLIMIT 10",
+          "refId": "A",
+          "editorMode": "code"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": [
+    "fraud",
+    "business",
+    "postgres"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "state",
+        "label": "US state",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "postgres"
+        },
+        "definition": "SELECT DISTINCT us_state AS __text, us_state AS __value FROM scores ORDER BY 1",
+        "query": "SELECT DISTINCT us_state AS __text, us_state AS __value FROM scores ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      },
+      {
+        "name": "merch",
+        "label": "Merchant",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "postgres"
+        },
+        "definition": "SELECT DISTINCT merch AS __text, merch AS __value FROM scores ORDER BY 1",
+        "query": "SELECT DISTINCT merch AS __text, merch AS __value FROM scores ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Fraud Business Analysis — фильтры и категории",
+  "uid": "fraud-business",
+  "version": 1
+}

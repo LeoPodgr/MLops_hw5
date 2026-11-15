@@ -1,0 +1,120 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: fraud-monitoring-alerts
+    folder: Fraud Monitoring
+    interval: 10s
+    rules:
+      - uid: fraud_share_high
+        title: Fraud share above 25 percent
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: 100 * sum(rate(fraud_scorer_fraud_transactions_total[5m])) / clamp_min(sum(rate(fraud_scorer_transactions_processed_total[5m])), 0.001)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+              range: false
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [25]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Fraud flag share exceeded 25% during the last five minutes.
+          description: Check model version and incoming transaction distribution in the Fraud Scoring dashboard.
+        labels:
+          severity: warning
+          service: fraud-detector
+        isPaused: false
+
+      - uid: scoring_stream_stopped
+        title: Scoring stream stopped
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: sum(rate(fraud_scorer_transactions_processed_total[2m])) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+              range: false
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0.1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: threshold
+        noDataState: Alerting
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Scorer throughput is below 0.1 transaction per second.
+          description: Check the transaction simulator, Kafka topic and fraud-detector consumer.
+        labels:
+          severity: critical
+          service: fraud-detector
+        isPaused: false
