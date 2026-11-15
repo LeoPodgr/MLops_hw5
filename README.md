@@ -1,8 +1,6 @@
 # Real-time Fraud Monitoring: Kafka + Prometheus + Grafana
 
-Самодостаточный учебный проект мониторинга ML-сервиса детекции фрода. Включает непрерывный поток транзакций через Kafka, онлайн-скоринг, запись результатов в PostgreSQL, hot-reload модели без перезапуска скорера, Prometheus, Grafana, Node Exporter, четыре дашборда и два provisioned alert rules.
-
-> **Важно про интеграцию с предыдущим ДЗ.** В чате не было приложено вашего исходного репозитория, поэтому здесь сделана самостоятельная рабочая кодовая база с тем же потоком сервисов. Это не копия JSON-конфигураций семинара. Для переноса в прошлый проект оставьте Kafka topics и контракт сообщения, заменив содержимое `fraud_monitoring/model.py`/`scorer.py` на ваш inference-код и подключив ваш процесс обучения к формату публикации модели из раздела «Hot reload модели». Поведение мониторинга, PostgreSQL и Grafana от этого не меняется.
+Учебный проект мониторинга ML-сервиса детекции фрода. Включает непрерывный поток транзакций через Kafka, онлайн-скоринг, запись результатов в PostgreSQL, hot-reload модели без перезапуска скорера, Prometheus, Grafana, Node Exporter, четыре дашборда и два provisioned alert rules.
 
 ## 1. Архитектура
 
@@ -45,7 +43,7 @@ transaction-simulator
 
 ## 2. Быстрый запуск
 
-Требуются Docker Engine и Docker Compose plugin. Для быстрой проверки кода без контейнеров см. раздел 7.
+Требуются Docker Engine и Docker Compose plugin
 
 ```bash
 cp .env.example .env
@@ -72,9 +70,7 @@ docker compose ps
 | Node Exporter | http://localhost:9100/metrics | без авторизации |
 | PostgreSQL | `localhost:5432` | `fraud_user` / `fraud_pass_change_me` |
 
-Логин и пароль Grafana и PostgreSQL задаются через `.env`. Значения по умолчанию предназначены только для локального запуска. Не публикуйте порты такого dev-стека в интернет.
-
-Первое создание образа приложения и скачивание образов мониторинга займут больше времени, чем повторные запуски. При следующем старте без изменения кода:
+Логин и пароль Grafana и PostgreSQL задаются через `.env`.
 
 ```bash
 docker compose up -d --no-build
@@ -160,7 +156,7 @@ python tools/publish_model.py --bias -4.0
 
 Это демонстрационная логистическая модель на CPU. Качество модели не является целью задания. В существующем ML-проекте ваш trainer должен создавать JSON/артефакт с тем же контрактом (`version`, `bias`, `weights`, `fraud_threshold`) либо вы можете заменить `FraudModel.load()` и `predict_score()` на загрузку CatBoost/другой модели. Критически важно: сначала записать завершённый артефакт, затем атомарно обновить `latest.txt`.
 
-## 5. Дополнительные требования на 8–10 баллов
+## 5. Дополнения
 
 ### Grafana Alerting
 
@@ -262,88 +258,7 @@ docker compose exec fraud-detector python /app/tools/publish_demo_batch.py \
 
 После записи в БД выберите `NY` и `demo_high_risk_merchant` на дашборде **Fraud Business Analysis**. Тестовые записи попадут в density/TPS и категорийный barplot.
 
-## 7. Как проверять изменения без долгой сборки всего проекта
-
-Это основной быстрый цикл разработки. Большая часть конфигурации — JSON/YAML и монтируется в контейнеры как файлы, поэтому пересобирать приложение при каждом изменении дашборда не нужно.
-
-### Уровень 1 — проверка Python/JSON/YAML за секунды, без Docker
-
-Выполните из корня проекта:
-
-```bash
-python tools/validate_project.py
-python -m unittest discover -s tests -v
-python -m compileall -q services/src tools
-```
-
-Что проверяется:
-
-- JSON всех четырёх дашбордов парсится;
-- на каждом дашборде есть панели;
-- ключевые метрики объявлены в коде сервисов;
-- `latest.txt` указывает на существующий модельный файл;
-- в provisioning есть два Grafana alert rules;
-- тесты модели проверяют загрузку версии, диапазон score 0–1 и то, что high-risk транзакция получает score выше low-risk.
-
-`tools/validate_project.py` и unit-тесты не требуют запущенных контейнеров.
-
-### Уровень 2 — проверка Compose и конфигов без сборки образов
-
-```bash
-docker compose config -q
-```
-
-Команда проверяет структуру и подстановку переменных Compose, но не скачивает образы, не собирает приложение и не запускает контейнеры.
-
-После изменения только дашборда:
-
-```bash
-python tools/generate_dashboards.py
-# Grafana перечитает JSON по provisioning interval; если нужно ускорить:
-docker compose restart grafana
-```
-
-После изменения только `prometheus/prometheus.yml`:
-
-```bash
-curl -X POST http://localhost:9090/-/reload
-```
-
-После изменения только alert provisioning:
-
-```bash
-docker compose restart grafana
-```
-
-Эти действия не требуют сборки Python-образа.
-
-### Уровень 3 — запустить только инфраструктуру
-
-Можно проверить, что поднялись брокер, БД и мониторинг, не собирая Python-сервисы:
-
-```bash
-docker compose up -d redpanda postgres prometheus grafana node-exporter
-```
-
-На этом этапе откроются Prometheus/Grafana, но сервисных метрик и данных PostgreSQL ещё не будет — это ожидаемо.
-
-### Уровень 4 — собрать приложение один раз и дальше запускать без пересборки
-
-```bash
-docker compose build fraud-detector scoring-writer transaction-simulator
-docker compose up -d --no-build
-```
-
-После этого при обычных повторных запусках используйте `docker compose up -d --no-build`. Если меняли только `.py` код, нужно пересобрать общий application image и пересоздать только сервисы приложения:
-
-```bash
-docker compose build fraud-detector scoring-writer transaction-simulator
-docker compose up -d --no-deps fraud-detector scoring-writer transaction-simulator
-```
-
-Если меняли только модель, не нужно ни пересобирать образ, ни перезапускать сервис: `python tools/publish_model.py ...`.
-
-## 8. Структура репозитория
+## 7. Структура репозитория
 
 ```text
 .
@@ -379,7 +294,7 @@ docker compose up -d --no-deps fraud-detector scoring-writer transaction-simulat
 └── tests/test_model.py
 ```
 
-## 9. Остановка и очистка
+## 8. Остановка и очистка
 
 Остановить контейнеры, сохранив данные и Grafana provisioning state:
 
@@ -392,21 +307,3 @@ docker compose down
 ```bash
 docker compose down -v
 ```
-
-Команда с `-v` полностью очищает локальные данные — используйте её только когда действительно хотите начать с нуля.
-
-
-## 10. Публикация в GitHub
-
-После проверки создайте пустой публичный репозиторий на GitHub, распакуйте проект и выполните из его корня (подставьте URL своего репозитория):
-
-```bash
-git init
-git add .
-git commit -m "Add real-time fraud monitoring"
-git branch -M main
-git remote add origin https://github.com/<your-user>/<your-repository>.git
-git push -u origin main
-```
-
-Перед публикацией не добавляйте настоящий `.env`: в `.gitignore` он уже исключён. В репозиторий попадает только `.env.example` с локальными учебными значениями.
